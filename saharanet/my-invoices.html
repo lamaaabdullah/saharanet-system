@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Invoices - Sahara Net</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        
+        .filter-buttons {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+            color: #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        .filter-btn.active, .filter-btn:hover {
+            background-color: #5d3567;
+            color: #fff;
+            border-color: #5d3567;
+        }
+        
+        .invoice-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-content: center;
+            justify-content: center;
+        }
+        .invoice-modal-content {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            position: relative;
+            margin: 50px auto;
+        }
+        .close-modal {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #777;
+        }
+        .close-modal:hover { color: #000; }
+        .invoice-header-info {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 15px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header class="custom-clean-header">
+            <div class="header-top-row">
+                <a href="index.html"><img src="images/Sahara-Net-logo.png" class="clean-logo-img"></a>
+            </div>
+            <div class="header-navigation-bar">
+                <button class="nav-toggle-btn" onclick="toggleMobileNav()" aria-label="Menu">&#9776;</button>
+                <ul id="main-nav-list">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="customer-dashboard.html">Overview</a></li>
+                    <li><a href="my-subscription.html">My Subscription</a></li>
+                    <li><a href="my-invoices.html">Invoices</a></li>
+                    <li><a href="support-tickets.html">Support</a></li>
+                    <li><a href="profile-settings.html">Profile</a></li>
+                    <li><a href="#" onclick="logoutUser(); return false;">Logout</a></li>
+                </ul>
+            </div>
+        </header>
+
+        <section class="dashboard-content">
+            <h1 style="color:#5d3567;">My Invoices</h1>
+            <p style="color:#777;">Your billing and payment history and purchased items</p>
+
+            <div class="filter-buttons">
+                <button class="filter-btn active" onclick="filterInvoices('all', this)">All</button>
+                <button class="filter-btn" onclick="filterInvoices('paid', this)">Paid </button>
+                <button class="filter-btn" onclick="filterInvoices('unpaid', this)">Unpaid </button>
+    
+            </div>
+
+            <div class="dashboard-card">
+                <div id="invoices-list">
+                    <p class="empty-state">Loading...</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div id="invoiceModal" class="invoice-modal">
+        <div class="invoice-modal-content" id="printableInvoiceArea">
+            <span class="close-modal" onclick="closeInvoiceModal()">&times;</span>
+            <div id="modal-body-content">
+               
+            </div>
+        </div>
+    </div>
+
+    <footer id="footer">All rights reserved to Sahara Net &copy; 1989 - 2026</footer>
+    <div id="notification" class="notification-toast"><span id="notification-text"></span></div>
+
+    <script src="js/supabaseClient.js"></script>
+    <script src="js/auth.js"></script>
+    <script>
+        let invoicesData = [];
+        let currentFilter = 'all';
+
+        async function init() {
+            const user = await requireLogin();
+            if (!user) return;
+
+            const { data: customer } = await supabase.from('customer').select('customer_id').eq('user_id', user.id).single();
+            if (!customer) {
+                document.getElementById('invoices-list').innerHTML = '<p class="empty-state" style="color:red;">Could not load your profile. Please log out and back in, or contact support.</p>';
+                return;
+            }
+
+            const { data: invoices, error } = await supabase
+                .from('billing')
+                .select('*, booking:booking_id (start_date, service:service_id (name, price))')
+                .eq('customer_id', customer.customer_id)
+                .order('invoice_date', { ascending: false });
+
+            const container = document.getElementById('invoices-list');
+
+            if (error) {
+                container.innerHTML = `<p class="empty-state" style="color:red;">${error.message}</p>`;
+                return;
+            }
+
+            invoicesData = invoices || [];
+            renderInvoices();
+        }
+
+        function filterInvoices(status, btnElement) {
+            currentFilter = status;
+            
+            // تغيير شكل الزر المفعل
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+
+            renderInvoices();
+        }
+
+        function renderInvoices() {
+            const container = document.getElementById('invoices-list');
+
+            const filteredInvoices = currentFilter === 'all' 
+                ? invoicesData 
+                : invoicesData.filter(inv => inv.payment_status === currentFilter);
+
+            if (filteredInvoices.length === 0) {
+                container.innerHTML = "<p class=\"empty-state\">No invoices found for this filter.</p>";
+                return;
+            }
+
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Purchased Item / Service</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filteredInvoices.map(inv => `
+                            <tr>
+                                <td>#${inv.invoicing_id}</td>
+                                <td><strong>${inv.booking?.service?.name ?? 'Subscription / Service'}</strong></td>
+                                <td>${inv.amount} SAR</td>
+                                <td>${inv.invoice_date}</td>
+                                <td><span class="status-badge status-${inv.payment_status}">${inv.payment_status}</span></td>
+                                <td>
+                                    <button class="small-btn primary" onclick="viewInvoice(${inv.invoicing_id})">View</button>
+                                    <button class="small-btn" style="background-color: #6c757d; color: white;" onclick="downloadInvoice(${inv.invoicing_id})">Download</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function viewInvoice(invoiceId) {
+            const inv = invoicesData.find(i => i.invoicing_id === invoiceId);
+            if (!inv) return;
+
+            const modalBody = document.getElementById('modal-body-content');
+            modalBody.innerHTML = `
+                <div class="invoice-header-info">
+                    <h2 style="color:#5d3567; margin-bottom:5px;">Sahara Net - Invoice</h2>
+                    <p style="color:#777; margin:0;">Invoice ID: #${inv.invoicing_id}</p>
+                    <p style="color:#777; margin:0;">Date: ${inv.invoice_date}</p>
+                </div>
+                <div style="margin: 20px 0;">
+                    <h3 style="color:#333; font-size:16px;">Purchased Details:</h3>
+                    <p><strong>Service/Product:</strong> ${inv.booking?.service?.name ?? 'N/A'}</p>
+                    <p><strong>Payment Method:</strong> ${inv.payment_method ?? 'N/A'}</p>
+                    <p><strong>Status:</strong> <span class="status-badge status-${inv.payment_status}">${inv.payment_status}</span></p>
+                </div>
+                <div style="border-top: 2px solid #eee; padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 18px; font-weight: bold;">Total Amount:</span>
+                    <span style="font-size: 20px; color: #5d3567; font-weight: bold;">${inv.amount} SAR</span>
+                </div>
+            `;
+
+            document.getElementById('invoiceModal').style.display = 'flex';
+        }
+
+        function closeInvoiceModal() {
+            document.getElementById('invoiceModal').style.display = 'none';
+        }
+
+        function downloadInvoice(invoiceId) {
+            const inv = invoicesData.find(i => i.invoicing_id === invoiceId);
+            if (!inv) return;
+
+            const invoiceText = `
+SAHARA NET - INVOICE #${inv.invoicing_id}
+----------------------------------------
+Date: ${inv.invoice_date}
+Item/Service: ${inv.booking?.service?.name ?? 'N/A'}
+Amount: ${inv.amount} SAR
+Payment Method: ${inv.payment_method ?? 'N/A'}
+Status: ${inv.payment_status}
+----------------------------------------
+Thank you for choosing Sahara Net!
+            `.trim();
+
+            const blob = new Blob([invoiceText], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Invoice_${inv.invoicing_id}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('invoiceModal');
+            if (event.target === modal) {
+                closeInvoiceModal();
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

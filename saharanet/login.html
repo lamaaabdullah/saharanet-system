@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Sahara Net</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div id="notification" class="notification-toast"><span id="notification-text"></span></div>
+
+    <header class="custom-clean-header">
+        <div class="header-top-row">
+            <a href="index.html"><img src="images/Sahara-Net-logo.png" class="clean-logo-img"></a>
+        </div>
+    </header>
+
+    <section class="login-container-section">
+        <div class="login-card">
+            <div class="login-header-zone"><h2>Login</h2></div>
+
+            <form id="loginForm">
+                <div class="custom-form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="custom-form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" required>
+                </div>
+                <div class="submit-btn-zone"><button type="submit">Login</button></div>
+            </form>
+
+            <div class="links-zone">
+                <a href="forgot-password.html">Forgot password?</a>
+                <a href="signup.html">Don't have an account? Sign up</a>
+            </div>
+        </div>
+    </section>
+
+    <footer id="footer">All rights reserved to Sahara Net &copy; 1989 - 2026</footer>
+
+    <script src="js/supabaseClient.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/cart.js"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            const result = await loginUser(email, password);
+            showNotification(result.message, result.status);
+
+            if (result.status === 'success') {
+                const { data: { user } } = await supabase.auth.getUser();
+                const { data: admin } = await supabase.from('admin').select('admin_id').eq('user_id', user.id).eq('is_active', true).single();
+                const target = admin ? 'admin-dashboard.html' : 'customer-dashboard.html';
+                setTimeout(() => window.location.href = target, 1200);
+            }
+        });
+    </script>
+</body>
+</html>

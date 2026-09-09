@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Details - Sahara Net</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header class="custom-clean-header">
+            <div class="header-top-row">
+                <a href="index.html"><img src="images/Sahara-Net-logo.png" class="clean-logo-img"></a>
+            </div>
+            <div class="header-navigation-bar">
+                <button class="nav-toggle-btn" onclick="toggleMobileNav()" aria-label="Menu">&#9776;</button>
+                <ul id="main-nav-list">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="customer-dashboard.html">Overview</a></li>
+                    <li><a href="my-subscription.html">My Subscription</a></li>
+                    <li><a href="my-invoices.html">Invoices</a></li>
+                    <li><a href="support-tickets.html">Support</a></li>
+                    <li><a href="profile-settings.html">Profile</a></li>
+                    <li><a href="#" onclick="logoutUser(); return false;">Logout</a></li>
+                </ul>
+            </div>
+        </header>
+
+        <section class="dashboard-content">
+            <a href="support-tickets.html" style="color:#5d3567; text-decoration:none; font-weight:600;">&larr; Back to Tickets</a>
+
+            <div class="dashboard-card" style="margin-top:15px;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+                    <h2 id="ticket-title-header" style="color:#5d3567; margin:0;">Loading...</h2>
+                    <span id="ticket-status-badge" class="status-badge">-</span>
+                </div>
+                <p id="ticket-original-message" style="color:#555; white-space:pre-wrap; margin-top:15px; border-top:1px solid #eee; padding-top:15px;"></p>
+            </div>
+
+            <div class="dashboard-card">
+                <h3 style="color:#5d3567; margin-top:0;">Conversation</h3>
+                <div id="replies-container" style="max-height:400px; overflow-y:auto; padding:10px 0;">
+                    <p class="empty-state">Loading...</p>
+                </div>
+
+                <form id="replyForm" style="display:flex; gap:10px; margin-top:15px; border-top:1px solid #eee; padding-top:15px;">
+                    <input type="text" id="reply-message" placeholder="Type your reply here..." required style="flex:1; padding:12px; border-radius:8px; border:2px solid #e0e0e0;">
+                    <button type="submit" class="small-btn primary" style="padding:0 25px;">Send</button>
+                </form>
+            </div>
+        </section>
+    </div>
+
+    <footer id="footer">All rights reserved to Sahara Net &copy; 1989 - 2026</footer>
+    <div id="notification" class="notification-toast"><span id="notification-text"></span></div>
+
+    <script src="js/supabaseClient.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/cart.js"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const ticketId = urlParams.get('id');
+        let customerId = null;
+
+        async function init() {
+            const user = await requireLogin();
+            if (!user) return;
+
+            if (!ticketId) {
+                document.querySelector('.dashboard-content').innerHTML = '<p class="empty-state">No ticket specified.</p>';
+                return;
+            }
+
+            const { data: customer } = await supabase.from('customer').select('customer_id').eq('user_id', user.id).single();
+            if (!customer) {
+                document.querySelector('.dashboard-content').innerHTML = '<p class="empty-state" style="color:red;">Could not load your profile. Please log out and back in, or contact support.</p>';
+                return;
+            }
+            customerId = customer.customer_id;
+
+            await loadTicket();
+            await loadReplies();
+        }
+
+        async function loadTicket() {
+            const { data: ticket, error } = await supabase.from('support_logs').select('*').eq('support_id', ticketId).single();
+            if (error || !ticket) {
+                document.querySelector('.dashboard-content').innerHTML = '<p class="empty-state">Could not find this ticket.</p>';
+                return;
+            }
+            document.getElementById('ticket-title-header').innerText = ticket.title;
+            document.getElementById('ticket-original-message').innerText = ticket.content;
+            const badge = document.getElementById('ticket-status-badge');
+            badge.innerText = ticket.status;
+            badge.className = 'status-badge status-' + ticket.status;
+        }
+
+        async function loadReplies() {
+            const { data: replies, error } = await supabase
+                .from('ticket_replies')
+                .select('*')
+                .eq('support_id', ticketId)
+                .order('created_at', { ascending: true });
+
+            const container = document.getElementById('replies-container');
+            if (error) {
+                container.innerHTML = `<p class="empty-state" style="color:red;">${error.message}</p>`;
+                return;
+            }
+            if (!replies || replies.length === 0) {
+                container.innerHTML = '<p class="empty-state">No replies yet. Our support team will get back to you soon.</p>';
+                return;
+            }
+
+            container.innerHTML = replies.map(r => `
+                <div class="chat-bubble ${r.sender_type}">
+                    ${r.message}
+                    <span class="bubble-meta">${r.sender_type === 'admin' ? 'Support Team' : 'You'} • ${new Date(r.created_at).toLocaleString()}</span>
+                </div>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+
+            const hasAdminReply = replies.some(r => r.sender_type === 'admin');
+            if (hasAdminReply) {
+                showNotification('Support team has replied to this ticket', 'success');
+            }
+        }
+
+        document.getElementById('replyForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const message = document.getElementById('reply-message').value;
+
+            const { error } = await supabase.from('ticket_replies').insert({
+                support_id: ticketId, sender_type: 'customer', sender_id: customerId, message: message
+            });
+
+            if (error) { showNotification(error.message, 'error'); return; }
+
+            document.getElementById('reply-message').value = '';
+            showNotification('Reply sent!', 'success');
+            loadReplies();
+        });
+
+        init();
+    </script>
+</body>
+</html>

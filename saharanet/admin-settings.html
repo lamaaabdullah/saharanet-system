@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Settings - Sahara Net</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header class="custom-clean-header">
+            <div class="header-top-row">
+                <a href="admin-dashboard.html"><img src="images/Sahara-Net-logo.png" class="clean-logo-img"></a>
+                <span style="font-weight:700; color:#5d3567;">ADMIN</span>
+            </div>
+            <div class="header-navigation-bar">
+                <button class="nav-toggle-btn" onclick="toggleMobileNav()" aria-label="Menu">&#9776;</button>
+                <ul id="main-nav-list">
+                    <li><a href="admin-dashboard.html">Dashboard</a></li>
+                    <li><a href="admin-customers.html">Customers</a></li>
+                    <li><a href="admin-plans.html">Plans</a></li>
+                    <li><a href="admin-tickets.html">Support Tickets</a></li>
+                    <li><a href="admin-reports.html">Reports</a></li>
+                    <li><a href="admin-settings.html">Settings</a></li>
+                    <li><a href="#" onclick="logoutUser(); return false;">Logout</a></li>
+                </ul>
+            </div>
+        </header>
+
+        <section class="dashboard-content">
+            <h1 style="color:#5d3567;">Admin Users &amp; Roles</h1>
+            <p style="color:#777;">Manage support staff accounts and permissions</p>
+
+            <div class="dashboard-card">
+                <div id="access-warning" style="display:none; background:#fdecea; color:#c62828; padding:12px 18px; border-radius:8px; margin-bottom:15px;">
+                    You're viewing this page in read-only mode. Only SuperAdmins can edit roles or deactivate accounts.
+                </div>
+                <div id="admins-list"><p class="empty-state">Loading...</p></div>
+            </div>
+
+            <div class="dashboard-card">
+                <h3 style="color:#5d3567; margin-top:0;">Adding a New Admin</h3>
+                <p style="color:#555; line-height:1.6;">
+                    For security, new admin accounts can't be created from a public form. To add a new admin:
+                </p>
+                <ol style="color:#555; line-height:1.8;">
+                    <li>Ask the person to sign up as a regular customer first (or create the user manually from Supabase &rarr; Authentication &rarr; Users).</li>
+                    <li>Copy their User UID from the Supabase Authentication panel.</li>
+                    <li>Insert a row into the <code>admin</code> table with that <code>user_id</code>, their name, email, department, and a <code>role_id</code> from <code>admin_roles</code>.</li>
+                </ol>
+            </div>
+        </section>
+    </div>
+
+    <footer id="footer">All rights reserved to Sahara Net &copy; 1989 - 2026</footer>
+    <div id="notification" class="notification-toast"><span id="notification-text"></span></div>
+
+    <script src="js/supabaseClient.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/cart.js"></script>
+    <script>
+        let isSuperAdmin = false;
+
+        async function init() {
+            const admin = await requireAdmin();
+            if (!admin) return;
+
+            const { data: myRole } = await supabase.from('admin_roles').select('role_name').eq('role_id', admin.role_id).single();
+            isSuperAdmin = myRole?.role_name === 'SuperAdmin';
+            if (!isSuperAdmin) document.getElementById('access-warning').style.display = 'block';
+
+            loadAdmins();
+        }
+
+        async function loadAdmins() {
+            const { data: admins, error } = await supabase
+                .from('admin')
+                .select('*, role:role_id (role_name)')
+                .order('created_at', { ascending: false });
+
+            const { data: roles } = await supabase.from('admin_roles').select('*');
+
+            const container = document.getElementById('admins-list');
+            if (error) { container.innerHTML = `<p class="empty-state" style="color:red;">${error.message}</p>`; return; }
+            if (!admins || admins.length === 0) { container.innerHTML = '<p class="empty-state">No admin accounts found.</p>'; return; }
+
+            container.innerHTML = `
+                <table class="data-table">
+                    <thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Status</th>${isSuperAdmin ? '<th></th>' : ''}</tr></thead>
+                    <tbody>
+                        ${admins.map(a => `
+                            <tr>
+                                <td>${a.name}</td>
+                                <td>${a.email}</td>
+                                <td>${a.department ?? '-'}</td>
+                                <td>
+                                    ${isSuperAdmin
+                                        ? `<select onchange="changeRole(${a.admin_id}, this.value)" style="padding:6px; border-radius:6px; border:1px solid #ddd;">
+                                             ${(roles ?? []).map(r => `<option value="${r.role_id}" ${r.role_id === a.role_id ? 'selected' : ''}>${r.role_name}</option>`).join('')}
+                                           </select>`
+                                        : (a.role?.role_name ?? '-')}
+                                </td>
+                                <td><span class="status-badge status-${a.is_active ? 'active' : 'suspended'}">${a.is_active ? 'active' : 'inactive'}</span></td>
+                                ${isSuperAdmin ? `<td><button class="small-btn ${a.is_active ? 'danger' : 'primary'}" onclick="toggleActive(${a.admin_id}, ${!a.is_active})">${a.is_active ? 'Deactivate' : 'Activate'}</button></td>` : ''}
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        async function changeRole(adminId, newRoleId) {
+            const { error } = await supabase.from('admin').update({ role_id: newRoleId }).eq('admin_id', adminId);
+            if (error) { showNotification(error.message, 'error'); return; }
+            showNotification('Role updated', 'success');
+        }
+
+        async function toggleActive(adminId, newValue) {
+            const { error } = await supabase.from('admin').update({ is_active: newValue }).eq('admin_id', adminId);
+            if (error) { showNotification(error.message, 'error'); return; }
+            showNotification('Account updated', 'success');
+            loadAdmins();
+        }
+
+        init();
+    </script>
+</body>
+</html>
